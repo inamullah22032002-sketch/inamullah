@@ -88,8 +88,9 @@ uploadsRouter.post('/presign', authenticateToken, requireAdmin, async (req: Auth
     });
   } catch (err: any) {
     console.error('Presign single upload error:', err);
-    return res.status(err.message?.startsWith('R2_NOT_CONFIGURED') ? 503 : 400).json({
-      error: 'PRESIGN_FAILED',
+    const isUnconfigured = err.message?.startsWith('R2_NOT_CONFIGURED');
+    return res.status(isUnconfigured ? 503 : 400).json({
+      error: isUnconfigured ? 'R2_NOT_CONFIGURED' : 'R2_PRESIGN_FAILED',
       message: err.message || 'Could not generate direct Cloudflare R2 upload URL.',
     });
   }
@@ -198,8 +199,9 @@ uploadsRouter.post('/multipart/initiate', authenticateToken, requireAdmin, async
     });
   } catch (err: any) {
     console.error('Initiate upload error:', err);
-    return res.status(err.message?.startsWith('R2_NOT_CONFIGURED') ? 503 : 500).json({
-      error: 'UPLOAD_INITIALIZATION_FAILED',
+    const isUnconfigured = err.message?.startsWith('R2_NOT_CONFIGURED');
+    return res.status(isUnconfigured ? 503 : 500).json({
+      error: isUnconfigured ? 'R2_NOT_CONFIGURED' : 'R2_MULTIPART_INIT_FAILED',
       message: err.message || 'Failed to initialize multipart upload with Cloudflare R2.',
     });
   }
@@ -236,8 +238,9 @@ uploadsRouter.post('/multipart/sign', authenticateToken, requireAdmin, async (re
     });
   } catch (err: any) {
     console.error('Sign part error:', err);
-    return res.status(500).json({
-      error: 'PART_SIGNING_FAILED',
+    const isUnconfigured = err.message?.startsWith('R2_NOT_CONFIGURED');
+    return res.status(isUnconfigured ? 503 : 500).json({
+      error: isUnconfigured ? 'R2_NOT_CONFIGURED' : 'R2_PART_SIGN_FAILED',
       message: err.message || 'Could not generate genuine Cloudflare R2 presigned URL for part.',
     });
   }

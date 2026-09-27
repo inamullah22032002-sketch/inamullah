@@ -165,6 +165,19 @@ export const api = {
       }),
     
     // Storage & Uploads
+    getR2Status: () =>
+      request<{
+        configured: boolean;
+        accountIdPresent: boolean;
+        accessKeyPresent: boolean;
+        secretKeyPresent: boolean;
+        bucketPresent: boolean;
+        endpointPresent: boolean;
+        missing?: string[];
+        connection?: 'ok' | 'failed' | 'unconfigured';
+        error?: string;
+        message?: string;
+      }>('/api/admin/r2/status'),
     getUploads: () => request<any>('/api/admin/uploads'),
     deleteUpload: (id: string) => request<any>(`/api/admin/uploads/${id}`, { method: 'DELETE' }),
     presignSingle: (metadata: { filename: string; size: number; contentType: string; movieId?: string }) =>

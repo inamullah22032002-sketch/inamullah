@@ -11,7 +11,8 @@ import {
   ArrowRight,
   Shield,
   Eye,
-  EyeOff
+  EyeOff,
+  RefreshCw
 } from 'lucide-react';
 import { api } from '../../services/api';
 
@@ -30,9 +31,31 @@ export const AdminSettingsView: React.FC = () => {
   const [passwordSuccess, setPasswordSuccess] = useState<string | null>(null);
   const [passwordError, setPasswordError] = useState<string | null>(null);
 
+  // R2 Status State
+  const [r2Status, setR2Status] = useState<any | null>(null);
+  const [testingR2, setTestingR2] = useState(false);
+
   useEffect(() => {
     fetchStats();
+    fetchR2Status();
   }, []);
+
+  const fetchR2Status = async () => {
+    setTestingR2(true);
+    try {
+      const data = await api.admin.getR2Status();
+      setR2Status(data);
+    } catch (e: any) {
+      setR2Status({
+        configured: false,
+        connection: 'failed',
+        error: 'R2_CONNECTION_FAILED',
+        message: e.message || 'Failed to check Cloudflare R2 status',
+      });
+    } finally {
+      setTestingR2(false);
+    }
+  };
 
   const fetchStats = async () => {
     try {
@@ -288,27 +311,86 @@ export const AdminSettingsView: React.FC = () => {
             </div>
 
             {/* Cloudflare R2 */}
-            <div className="p-5 rounded-2xl bg-slate-900/60 border border-white/10 space-y-3">
+            <div className="p-5 rounded-2xl bg-slate-900/60 border border-white/10 space-y-4">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <CloudLightning className="w-5 h-5 text-indigo-400" />
                   <h3 className="text-sm font-bold text-white font-heading">Cloudflare R2 Storage</h3>
                 </div>
-                {stats?.system.isR2Configured ? (
-                  <span className="flex items-center gap-1 text-[11px] font-mono text-emerald-400">
-                    <CheckCircle2 className="w-3.5 h-3.5" /> S3 Client Ready
-                  </span>
-                ) : (
-                  <span className="flex items-center gap-1 text-[11px] font-mono text-rose-400">
-                    <AlertTriangle className="w-3.5 h-3.5" /> Credentials Missing
-                  </span>
-                )}
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={fetchR2Status}
+                    disabled={testingR2}
+                    className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-[11px] text-slate-300 font-medium transition disabled:opacity-50"
+                  >
+                    <RefreshCw className={`w-3 h-3 ${testingR2 ? 'animate-spin text-cyan-400' : ''}`} />
+                    {testingR2 ? 'Testing...' : 'Test Connection'}
+                  </button>
+                  {r2Status?.connection === 'ok' ? (
+                    <span className="flex items-center gap-1 text-[11px] font-mono text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2.5 py-0.5 rounded-full">
+                      <CheckCircle2 className="w-3.5 h-3.5" /> S3 Verified
+                    </span>
+                  ) : r2Status?.connection === 'failed' ? (
+                    <span className="flex items-center gap-1 text-[11px] font-mono text-rose-400 bg-rose-500/10 border border-rose-500/20 px-2.5 py-0.5 rounded-full">
+                      <AlertTriangle className="w-3.5 h-3.5" /> {r2Status.error || 'Connection Failed'}
+                    </span>
+                  ) : (
+                    <span className="flex items-center gap-1 text-[11px] font-mono text-amber-400 bg-amber-500/10 border border-amber-500/20 px-2.5 py-0.5 rounded-full">
+                      <AlertTriangle className="w-3.5 h-3.5" /> Missing Config
+                    </span>
+                  )}
+                </div>
               </div>
+
               <p className="text-xs text-slate-400 leading-relaxed">
-                {stats?.system.isR2Configured
-                  ? `Connected to bucket '${stats.system.bucketName || 'funclubsi'}'. Video uploads stream directly from the browser to Cloudflare R2 S3 endpoints without proxying.`
-                  : 'R2_ACCESS_KEY_ID or R2_SECRET_ACCESS_KEY omitted in environment. Direct uploads require active S3 credentials.'}
+                {r2Status?.message ||
+                  (stats?.system.isR2Configured
+                    ? `Connected to bucket '${stats.system.bucketName || 'funclubsi'}'. Video uploads stream directly from the browser to Cloudflare R2 S3 endpoints without proxying.`
+                    : 'Cloudflare R2 server environment variables must be configured on Netlify.')}
               </p>
+
+              {/* Safe Environment Presence Checklist */}
+              {r2Status && (
+                <div className="pt-2 border-t border-white/5">
+                  <span className="text-[10px] uppercase tracking-wider font-mono text-slate-500 block mb-2">
+                    Server Environment Variable Check (Safe Audit)
+                  </span>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                    {[
+                      { key: 'R2_ACCOUNT_ID', present: r2Status.accountIdPresent },
+                      { key: 'R2_ACCESS_KEY_ID', present: r2Status.accessKeyPresent },
+                      { key: 'R2_SECRET_ACCESS_KEY', present: r2Status.secretKeyPresent },
+                      { key: 'R2_BUCKET_NAME', present: r2Status.bucketPresent },
+                      { key: 'R2_ENDPOINT', present: r2Status.endpointPresent },
+                    ].map((item) => (
+                      <div
+                        key={item.key}
+                        className={`p-2 rounded-lg border text-[11px] font-mono flex items-center justify-between ${
+                          item.present
+                            ? 'bg-emerald-950/20 border-emerald-500/20 text-emerald-300'
+                            : 'bg-rose-950/20 border-rose-500/20 text-rose-300'
+                        }`}
+                      >
+                        <span className="truncate">{item.key}</span>
+                        {item.present ? (
+                          <span className="text-[10px] text-emerald-400 shrink-0 ml-1">✓ Set</span>
+                        ) : (
+                          <span className="text-[10px] text-rose-400 shrink-0 ml-1">✗ Missing</span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+
+                  {r2Status.missing && r2Status.missing.length > 0 && (
+                    <div className="mt-3 p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-300 text-xs flex flex-col gap-1">
+                      <span className="font-semibold text-amber-200">Required in Netlify Site Configuration:</span>
+                      <p className="text-[11px] font-mono text-amber-400">
+                        Please set: {r2Status.missing.join(', ')} under Site configuration &gt; Environment variables.
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           </div>
 

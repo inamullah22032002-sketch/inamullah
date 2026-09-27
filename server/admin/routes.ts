@@ -3,7 +3,7 @@ import os from 'os';
 import bcrypt from 'bcryptjs';
 import { db } from '../db';
 import { authenticateToken, requireAdmin, AuthRequest } from '../auth/jwt';
-import { isR2Configured, getR2Config } from '../r2/config';
+import { isR2Configured, getR2Config, getR2DetailedStatus } from '../r2/config';
 
 export const adminRouter = Router();
 
@@ -218,7 +218,27 @@ adminRouter.get('/health', async (_req: AuthRequest, res: Response) => {
   }
 });
 
-// 6. CHANGE ADMIN PASSWORD
+// 6. SAFE CLOUDFLARE R2 CONFIGURATION & CONNECTIVITY STATUS
+adminRouter.get('/r2/status', async (_req: AuthRequest, res: Response) => {
+  try {
+    const status = await getR2DetailedStatus();
+    return res.json(status);
+  } catch (err: any) {
+    return res.status(500).json({
+      configured: false,
+      accountIdPresent: false,
+      accessKeyPresent: false,
+      secretKeyPresent: false,
+      bucketPresent: false,
+      endpointPresent: false,
+      connection: 'failed',
+      error: 'R2_CONNECTION_FAILED',
+      message: err.message || 'Error checking Cloudflare R2 status.',
+    });
+  }
+});
+
+// 7. CHANGE ADMIN PASSWORD
 adminRouter.post('/change-password', async (req: AuthRequest, res: Response) => {
   try {
     const { currentPassword, newPassword, confirmPassword } = req.body;
