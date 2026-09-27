@@ -1,4 +1,3 @@
 /api/health   /.netlify/functions/health        200!
-/api/movies   /.netlify/functions/api/movies    200!
 /api/*        /.netlify/functions/api/:splat    200!
 /*            /index.html                       200

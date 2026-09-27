@@ -6,29 +6,29 @@
 [functions]
   node_bundler = "esbuild"
 
-# 1. Direct Health Check Function
+# -------------------------------------------------------------------
+# 1. API FUNCTION ROUTING (MUST BE PLACED BEFORE SPA CATCH-ALL)
+# -------------------------------------------------------------------
+
+# Direct health check function (independent of DB/R2)
 [[redirects]]
   from = "/api/health"
   to = "/.netlify/functions/health"
   status = 200
   force = true
 
-# 2. Standalone Movies Function if called directly
-[[redirects]]
-  from = "/api/movies"
-  to = "/.netlify/functions/api/movies"
-  status = 200
-  force = true
-
-# 3. Direct All /api/* Routes to the Unified Netlify API Function
+# Route all API requests to the unified Netlify Function wrapper
 [[redirects]]
   from = "/api/*"
   to = "/.netlify/functions/api/:splat"
   status = 200
   force = true
 
-# 4. SPA Catch-All Fallback (MUST BE LAST)
-# Any route not matching /api/* or /.netlify/* serves index.html with HTTP 200
+# -------------------------------------------------------------------
+# 2. SPA CATCH-ALL REDIRECT (MUST BE LAST)
+# -------------------------------------------------------------------
+# Client-side routing fallback: only routes not matching /api/* or
+# Netlify Functions will fall through to index.html with HTTP 200.
 [[redirects]]
   from = "/*"
   to = "/index.html"

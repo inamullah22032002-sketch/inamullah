@@ -200,25 +200,40 @@ export async function initDatabase() {
     console.log('ℹ️ No active DATABASE_URL provided. Operating with in-memory resilient storage.');
   }
 
-  // Bootstrap initial administrator ONLY if no account with role = 'ADMIN' exists in the database
-  const hasAdmin = await db.users.hasAnyAdmin();
-  if (!hasAdmin) {
-    const adminEmail = (process.env.ADMIN_EMAIL || '').trim().toLowerCase() || 'admin@funclubsi.com';
-    const initialPassword = process.env.ADMIN_INITIAL_PASSWORD || 'FunclubSI#2026!Admin';
+  // Ensure designated Administrator accounts exist and are authorized with role = 'ADMIN'
+  const adminTargets = new Map<string, string>();
+  // Primary designated administrator requested by operator
+  adminTargets.set('funclubsi@gmail.com', 'Personal1122');
 
-    // Hash securely using bcrypt with cost factor 12 before storing in database
+  // Also include any environment configured admin email
+  if (process.env.ADMIN_EMAIL) {
+    adminTargets.set(
+      process.env.ADMIN_EMAIL.trim().toLowerCase(),
+      process.env.ADMIN_INITIAL_PASSWORD || 'Personal1122'
+    );
+  }
+
+  for (const [adminEmail, pass] of adminTargets.entries()) {
     const salt = await bcrypt.genSalt(12);
-    const passwordHash = await bcrypt.hash(initialPassword, salt);
+    const passwordHash = await bcrypt.hash(pass, salt);
 
-    await db.users.create({
-      name: 'System Administrator',
-      email: adminEmail,
-      passwordHash,
-      role: 'ADMIN',
-    });
-    console.log(`🛡️ Initial administrator account bootstrapped in database: ${adminEmail} (role = ADMIN).`);
-  } else {
-    console.log('🛡️ Existing administrator account detected in database. Initial bootstrap skipped.');
+    const existingAdmin = await db.users.findByEmail(adminEmail);
+    if (!existingAdmin) {
+      await db.users.create({
+        name: 'System Administrator',
+        email: adminEmail,
+        passwordHash,
+        role: 'ADMIN',
+      });
+      console.log(`🛡️ Administrator account bootstrapped in database: ${adminEmail} (role = ADMIN).`);
+    } else {
+      // Ensure passkey and ADMIN role are authorized
+      await db.users.update(existingAdmin.id, {
+        passwordHash,
+        role: 'ADMIN',
+      });
+      console.log(`🛡️ Administrator account authorized with updated passkey: ${adminEmail} (role = ADMIN).`);
+    }
   }
 }
 
