@@ -1,0 +1,35 @@
+[build]
+  command = "npm run build"
+  publish = "dist"
+  functions = "netlify/functions"
+
+[functions]
+  node_bundler = "esbuild"
+
+# 1. Direct Health Check Function
+[[redirects]]
+  from = "/api/health"
+  to = "/.netlify/functions/health"
+  status = 200
+  force = true
+
+# 2. Standalone Movies Function if called directly
+[[redirects]]
+  from = "/api/movies"
+  to = "/.netlify/functions/api/movies"
+  status = 200
+  force = true
+
+# 3. Direct All /api/* Routes to the Unified Netlify API Function
+[[redirects]]
+  from = "/api/*"
+  to = "/.netlify/functions/api/:splat"
+  status = 200
+  force = true
+
+# 4. SPA Catch-All Fallback (MUST BE LAST)
+# Any route not matching /api/* or /.netlify/* serves index.html with HTTP 200
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200

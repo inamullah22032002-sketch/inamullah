@@ -1,0 +1,6 @@
+{
+  "name": "FunclubSI",
+  "description": "Futuristic movie and TV streaming, discovery, and direct Cloudflare R2 multipart media management platform.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
