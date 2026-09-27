@@ -1,6 +1,7 @@
 import { Router, Response } from 'express';
 import { authenticateToken, requireAdmin, AuthRequest } from '../auth/jwt';
 import {
+  createPresignedSingleUpload,
   createMultipartUpload,
   signUploadPart,
   completeMultipartUpload,
@@ -19,39 +20,143 @@ const ALLOWED_VIDEO_TYPES = [
   'video/ogg',
   'video/quicktime',
   'video/x-matroska',
+  'application/octet-stream',
 ];
 
-// 1. INITIATE MULTIPART UPLOAD
-uploadsRouter.post('/multipart/initiate', authenticateToken, requireAdmin, async (req: AuthRequest, res: Response) => {
-  try {
-    const { filename, size, mimeType, movieId } = req.body;
+// Helper to validate video metadata
+function validateVideoInput(filename?: string, size?: number, mimeType?: string) {
+  if (!filename || !size) {
+    throw new Error('Filename and file size are required.');
+  }
 
-    if (!filename || !size || !mimeType) {
+  const effectiveMime = mimeType || 'video/mp4';
+  const hasValidExt = !!filename.match(/\.(mp4|webm|mkv|mov|avi|ts|m4v)$/i);
+  const hasValidMime = ALLOWED_VIDEO_TYPES.includes(effectiveMime) || effectiveMime.startsWith('video/');
+
+  if (!hasValidExt && !hasValidMime) {
+    throw new Error(`File '${filename}' is not a recognized video format. Please upload MP4, WebM, MKV, or MOV.`);
+  }
+
+  // Maximum file size: 50 GB
+  const MAX_SIZE = 50 * 1024 * 1024 * 1024;
+  if (size > MAX_SIZE) {
+    throw new Error('Maximum allowed file size is 50 GB.');
+  }
+
+  return { effectiveMime };
+}
+
+/**
+ * 1. DIRECT SMALL-FILE PRESIGNED UPLOAD (POST /api/admin/uploads/presign)
+ * Small JSON request only. Returns Cloudflare R2 Presigned PutObject URL.
+ * Browser streams file directly to R2.
+ */
+uploadsRouter.post('/presign', authenticateToken, requireAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const { filename, size, contentType, mimeType, movieId } = req.body;
+    const effectiveType = contentType || mimeType || 'video/mp4';
+
+    validateVideoInput(filename, size, effectiveType);
+
+    const { presignedUrl, objectKey, publicUrl } = await createPresignedSingleUpload({
+      filename,
+      mimeType: effectiveType,
+      size,
+      movieId,
+    });
+
+    const uploadRecord = await db.uploads.create({
+      uploadId: 'single_' + Date.now(),
+      objectKey,
+      filename,
+      size,
+      mimeType: effectiveType,
+      status: 'UPLOADING',
+      progress: 0,
+      createdBy: req.user!.userId,
+      movieId,
+    });
+
+    return res.status(200).json({
+      url: presignedUrl,
+      presignedUrl,
+      objectKey,
+      publicUrl,
+      recordId: uploadRecord.id,
+      isDirectR2: true,
+      r2Configured: isR2Configured(),
+    });
+  } catch (err: any) {
+    console.error('Presign single upload error:', err);
+    return res.status(err.message?.startsWith('R2_NOT_CONFIGURED') ? 503 : 400).json({
+      error: 'PRESIGN_FAILED',
+      message: err.message || 'Could not generate direct Cloudflare R2 upload URL.',
+    });
+  }
+});
+
+/**
+ * 2. COMPLETE SMALL-FILE UPLOAD (POST /api/admin/uploads/complete-single)
+ * Notifies backend that direct Browser -> R2 PutObject succeeded.
+ */
+uploadsRouter.post('/complete-single', authenticateToken, requireAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const { objectKey, filename, size, mimeType, movieId } = req.body;
+
+    if (!objectKey) {
       return res.status(400).json({
         error: 'INVALID_METADATA',
-        message: 'Filename, size, and mimeType are required to initiate upload.',
+        message: 'objectKey is required to complete upload.',
       });
     }
 
-    if (!ALLOWED_VIDEO_TYPES.includes(mimeType) && !filename.match(/\.(mp4|webm|mkv|mov)$/i)) {
-      return res.status(400).json({
-        error: 'INVALID_FILE',
-        message: `File format '${mimeType}' is not supported. Please upload MP4, WebM, or MKV.`,
-      });
-    }
+    const config = getR2Config();
+    const publicUrl = config?.publicUrl
+      ? `${config.publicUrl.replace(/\/$/, '')}/${objectKey}`
+      : config?.endpoint
+      ? `${config.endpoint}/${config.bucketName}/${objectKey}`
+      : `/api/media/stream/${encodeURIComponent(objectKey)}`;
 
-    // Maximum file size: 50 GB
-    const MAX_SIZE = 50 * 1024 * 1024 * 1024;
-    if (size > MAX_SIZE) {
-      return res.status(400).json({
-        error: 'FILE_TOO_LARGE',
-        message: 'Maximum allowed file size is 50 GB.',
-      });
-    }
+    await db.auditLogs.record({
+      userId: req.user!.userId,
+      userName: req.user!.name,
+      userEmail: req.user!.email,
+      userRole: req.user!.role,
+      action: 'SINGLE_UPLOAD_COMPLETED',
+      resource: objectKey,
+      details: { filename, size, publicUrl },
+      ipAddress: (req.headers['x-forwarded-for'] as string) || req.socket.remoteAddress,
+      userAgent: req.headers['user-agent'],
+    });
+
+    return res.status(200).json({
+      status: 'COMPLETED',
+      publicUrl,
+      objectKey,
+    });
+  } catch (err: any) {
+    console.error('Complete single upload error:', err);
+    return res.status(500).json({
+      error: 'COMPLETE_FAILED',
+      message: err.message || 'Failed to register completed direct upload.',
+    });
+  }
+});
+
+/**
+ * 3. INITIATE MULTIPART UPLOAD (POST /api/admin/uploads/multipart/initiate)
+ * Small JSON request only. Initiates S3 multipart on Cloudflare R2.
+ */
+uploadsRouter.post('/multipart/initiate', authenticateToken, requireAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const { filename, size, mimeType, contentType, movieId } = req.body;
+    const effectiveType = contentType || mimeType || 'video/mp4';
+
+    validateVideoInput(filename, size, effectiveType);
 
     const { uploadId, objectKey, isDirectR2 } = await createMultipartUpload({
       filename,
-      mimeType,
+      mimeType: effectiveType,
       size,
       movieId,
     });
@@ -61,7 +166,7 @@ uploadsRouter.post('/multipart/initiate', authenticateToken, requireAdmin, async
       objectKey,
       filename,
       size,
-      mimeType,
+      mimeType: effectiveType,
       status: 'INITIALIZING',
       progress: 0,
       createdBy: req.user!.userId,
@@ -75,29 +180,35 @@ uploadsRouter.post('/multipart/initiate', authenticateToken, requireAdmin, async
       userRole: req.user!.role,
       action: 'UPLOAD_INITIATED',
       resource: objectKey,
-      details: { filename, size, mimeType, uploadId, isDirectR2 },
+      details: { filename, size, mimeType: effectiveType, uploadId, isDirectR2 },
       ipAddress: (req.headers['x-forwarded-for'] as string) || req.socket.remoteAddress,
       userAgent: req.headers['user-agent'],
     });
+
+    const PART_SIZE = 50 * 1024 * 1024; // 50 MiB parts for reliable direct R2 streaming
 
     return res.status(200).json({
       uploadId,
       objectKey,
       recordId: uploadRecord.id,
       isDirectR2,
-      chunkSize: 20 * 1024 * 1024, // 20 MB chunks for fast concurrency
+      partSize: PART_SIZE,
+      chunkSize: PART_SIZE,
       r2Configured: isR2Configured(),
     });
   } catch (err: any) {
     console.error('Initiate upload error:', err);
-    return res.status(500).json({
+    return res.status(err.message?.startsWith('R2_NOT_CONFIGURED') ? 503 : 500).json({
       error: 'UPLOAD_INITIALIZATION_FAILED',
       message: err.message || 'Failed to initialize multipart upload with Cloudflare R2.',
     });
   }
 });
 
-// 2. SIGN PART FOR DIRECT R2 UPLOAD
+/**
+ * 4. SIGN PART FOR DIRECT R2 UPLOAD (POST /api/admin/uploads/multipart/sign)
+ * Generates genuine Cloudflare R2 Presigned UploadPart URL.
+ */
 uploadsRouter.post('/multipart/sign', authenticateToken, requireAdmin, async (req: AuthRequest, res: Response) => {
   try {
     const { uploadId, objectKey, partNumber } = req.body;
@@ -118,6 +229,7 @@ uploadsRouter.post('/multipart/sign', authenticateToken, requireAdmin, async (re
     await db.uploads.updateStatus(uploadId, 'UPLOADING');
 
     return res.json({
+      url: presignedUrl,
       presignedUrl,
       isDirectR2,
       partNumber,
@@ -125,13 +237,16 @@ uploadsRouter.post('/multipart/sign', authenticateToken, requireAdmin, async (re
   } catch (err: any) {
     console.error('Sign part error:', err);
     return res.status(500).json({
-      error: 'PART_UPLOAD_FAILED',
-      message: err.message || 'Could not generate presigned signature for part.',
+      error: 'PART_SIGNING_FAILED',
+      message: err.message || 'Could not generate genuine Cloudflare R2 presigned URL for part.',
     });
   }
 });
 
-// 3. COMPLETE MULTIPART UPLOAD
+/**
+ * 5. COMPLETE MULTIPART UPLOAD (POST /api/admin/uploads/multipart/complete)
+ * Sends ETags array to complete assembly in Cloudflare R2.
+ */
 uploadsRouter.post('/multipart/complete', authenticateToken, requireAdmin, async (req: AuthRequest, res: Response) => {
   try {
     const { uploadId, objectKey, parts } = req.body;
@@ -148,7 +263,7 @@ uploadsRouter.post('/multipart/complete', authenticateToken, requireAdmin, async
       if (!p.PartNumber || !p.ETag) {
         return res.status(400).json({
           error: 'INVALID_PART_SPECIFICATION',
-          message: `Part ${p.PartNumber || 'unknown'} is missing required ETag.`,
+          message: `Part ${p.PartNumber || 'unknown'} is missing required ETag from Cloudflare R2.`,
         });
       }
     }
@@ -180,7 +295,9 @@ uploadsRouter.post('/multipart/complete', authenticateToken, requireAdmin, async
     });
   } catch (err: any) {
     console.error('Complete multipart error:', err);
-    await db.uploads.updateStatus(req.body.uploadId, 'FAILED', undefined, err.message);
+    if (req.body.uploadId) {
+      await db.uploads.updateStatus(req.body.uploadId, 'FAILED', undefined, err.message);
+    }
     return res.status(500).json({
       error: 'MULTIPART_COMPLETE_FAILED',
       message: err.message || 'Failed to complete multipart assembly on Cloudflare R2.',
@@ -188,7 +305,9 @@ uploadsRouter.post('/multipart/complete', authenticateToken, requireAdmin, async
   }
 });
 
-// 4. ABORT MULTIPART UPLOAD
+/**
+ * 6. ABORT MULTIPART UPLOAD (POST /api/admin/uploads/multipart/abort)
+ */
 uploadsRouter.post('/multipart/abort', authenticateToken, requireAdmin, async (req: AuthRequest, res: Response) => {
   try {
     const { uploadId, objectKey } = req.body;
@@ -205,16 +324,9 @@ uploadsRouter.post('/multipart/abort', authenticateToken, requireAdmin, async (r
   }
 });
 
-// 5. LOCAL DEV DIRECT-PART FALLBACK (Returns standard ETag header when running without live R2)
-uploadsRouter.put('/direct-part', (req, res) => {
-  // Generate valid ETag for chunk simulation
-  const dummyETag = `"${Date.now()}-${Math.floor(Math.random() * 1000000)}"`;
-  res.setHeader('ETag', dummyETag);
-  res.setHeader('Access-Control-Expose-Headers', 'ETag');
-  return res.status(200).send('Part received');
-});
-
-// 6. LIST ALL UPLOADS & STORAGE
+/**
+ * 7. LIST ALL UPLOADS & STORAGE STATS (GET /api/admin/uploads)
+ */
 uploadsRouter.get('/', authenticateToken, requireAdmin, async (req: AuthRequest, res: Response) => {
   try {
     const uploads = await db.uploads.list();
@@ -223,7 +335,7 @@ uploadsRouter.get('/', authenticateToken, requireAdmin, async (req: AuthRequest,
       uploads,
       stats,
       r2Configured: isR2Configured(),
-      bucket: getR2Config()?.bucketName || 'Not configured',
+      bucket: getR2Config()?.bucketName || 'funclubsi',
     });
   } catch (err: any) {
     return res.status(500).json({
@@ -233,12 +345,14 @@ uploadsRouter.get('/', authenticateToken, requireAdmin, async (req: AuthRequest,
   }
 });
 
-// 7. DELETE STORAGE RECORD + R2 OBJECT
+/**
+ * 8. DELETE STORAGE RECORD + R2 OBJECT (DELETE /api/admin/uploads/:id)
+ */
 uploadsRouter.delete('/:id', authenticateToken, requireAdmin, async (req: AuthRequest, res: Response) => {
   try {
     const { id } = req.params;
     const uploads = await db.uploads.list();
-    const target = uploads.find(u => u.id === id);
+    const target = uploads.find((u) => u.id === id);
 
     if (!target) {
       return res.status(404).json({ error: 'NOT_FOUND', message: 'Storage object not found.' });

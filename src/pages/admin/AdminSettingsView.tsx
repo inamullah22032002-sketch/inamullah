@@ -299,17 +299,56 @@ export const AdminSettingsView: React.FC = () => {
                     <CheckCircle2 className="w-3.5 h-3.5" /> S3 Client Ready
                   </span>
                 ) : (
-                  <span className="flex items-center gap-1 text-[11px] font-mono text-amber-400">
-                    <AlertTriangle className="w-3.5 h-3.5" /> Direct Emulation
+                  <span className="flex items-center gap-1 text-[11px] font-mono text-rose-400">
+                    <AlertTriangle className="w-3.5 h-3.5" /> Credentials Missing
                   </span>
                 )}
               </div>
               <p className="text-xs text-slate-400 leading-relaxed">
                 {stats?.system.isR2Configured
-                  ? `Connected to bucket '${stats.system.bucketName}'. Browser uploads bypass backend and stream directly to R2.`
-                  : 'R2_ACCESS_KEY_ID or R2_SECRET_ACCESS_KEY omitted in environment. Direct emulation handles chunk testing.'}
+                  ? `Connected to bucket '${stats.system.bucketName || 'funclubsi'}'. Video uploads stream directly from the browser to Cloudflare R2 S3 endpoints without proxying.`
+                  : 'R2_ACCESS_KEY_ID or R2_SECRET_ACCESS_KEY omitted in environment. Direct uploads require active S3 credentials.'}
               </p>
             </div>
+          </div>
+
+          {/* Cloudflare R2 CORS Configuration */}
+          <div className="p-6 rounded-2xl bg-slate-900/60 border border-white/10 space-y-3">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-bold text-white font-heading flex items-center gap-2">
+                <CloudLightning className="w-4 h-4 text-cyan-400" />
+                Cloudflare R2 Bucket CORS Policy (Bucket: funclubsi)
+              </h3>
+              <span className="text-[11px] font-mono text-cyan-400">ExposeHeaders: ["ETag"] Required</span>
+            </div>
+            <p className="text-xs text-slate-400 leading-relaxed">
+              To allow direct browser-to-R2 uploads and multipart assembly, your Cloudflare R2 bucket must have the following CORS policy configured in Cloudflare Dashboard → R2 → Bucket <strong>funclubsi</strong> → Settings → CORS Policy:
+            </p>
+            <pre className="p-4 rounded-xl bg-slate-950 border border-white/5 text-[11px] font-mono text-cyan-300 overflow-x-auto leading-relaxed">
+{`[
+  {
+    "AllowedOrigins": [
+      "https://ais-dev-xy3pj537mkewt45u6b3qa5-265849145062.asia-southeast1.run.app",
+      "https://ais-pre-xy3pj537mkewt45u6b3qa5-265849145062.asia-southeast1.run.app",
+      "https://funclubsi.netlify.app",
+      "http://localhost:3000",
+      "*"
+    ],
+    "AllowedMethods": [
+      "GET",
+      "HEAD",
+      "PUT"
+    ],
+    "AllowedHeaders": [
+      "*"
+    ],
+    "ExposeHeaders": [
+      "ETag"
+    ],
+    "MaxAgeSeconds": 3600
+  }
+]`}
+            </pre>
           </div>
 
           {/* Production Deployment Architecture Guide */}

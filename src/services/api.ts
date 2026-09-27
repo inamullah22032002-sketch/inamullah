@@ -167,6 +167,16 @@ export const api = {
     // Storage & Uploads
     getUploads: () => request<any>('/api/admin/uploads'),
     deleteUpload: (id: string) => request<any>(`/api/admin/uploads/${id}`, { method: 'DELETE' }),
+    presignSingle: (metadata: { filename: string; size: number; contentType: string; movieId?: string }) =>
+      request<{ url: string; presignedUrl: string; objectKey: string; publicUrl: string; isDirectR2: boolean }>('/api/admin/uploads/presign', {
+        method: 'POST',
+        body: JSON.stringify(metadata),
+      }),
+    completeSingle: (metadata: { objectKey: string; filename: string; size: number; mimeType: string; movieId?: string }) =>
+      request<{ status: string; publicUrl: string; objectKey: string }>('/api/admin/uploads/complete-single', {
+        method: 'POST',
+        body: JSON.stringify(metadata),
+      }),
     initiateMultipart: (metadata: { filename: string; size: number; mimeType: string; movieId?: string }) =>
       request<any>('/api/admin/uploads/multipart/initiate', { method: 'POST', body: JSON.stringify(metadata) }),
     signMultipartPart: (data: { uploadId: string; objectKey: string; partNumber: number }) =>

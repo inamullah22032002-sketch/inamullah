@@ -131,7 +131,7 @@ export async function initDatabase() {
 
         CREATE TABLE IF NOT EXISTS uploads (
           id VARCHAR(64) PRIMARY KEY,
-          upload_id VARCHAR(255) NOT NULL,
+          upload_id TEXT NOT NULL,
           object_key TEXT NOT NULL,
           filename VARCHAR(255) NOT NULL,
           size BIGINT NOT NULL,
@@ -144,6 +144,9 @@ export async function initDatabase() {
           created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
           completed_at TIMESTAMPTZ
         );
+
+        -- Ensure upload_id is TEXT to support long Cloudflare R2 tokens
+        ALTER TABLE uploads ALTER COLUMN upload_id TYPE TEXT;
 
         CREATE TABLE IF NOT EXISTS watchlist (
           id VARCHAR(64) PRIMARY KEY,

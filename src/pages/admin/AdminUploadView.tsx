@@ -337,14 +337,21 @@ export const AdminUploadView: React.FC<AdminUploadViewProps> = ({ onSuccess }) =
                   ></div>
                 </div>
 
-                <div className="flex flex-wrap justify-between text-[11px] text-slate-400 font-mono">
+                <div className="flex flex-wrap justify-between text-[11px] text-slate-400 font-mono gap-1">
+                  <span>Strategy: <strong className="text-cyan-400">{progressState.uploadStrategy === 'direct-single' ? 'Direct R2 PutObject' : 'Direct R2 S3 Multipart'}</strong></span>
                   <span>Part: {progressState.currentPart} / {progressState.totalParts}</span>
                   <span>Speed: {(progressState.speedBps / (1024 * 1024)).toFixed(2)} MB/s</span>
                   <span>Remaining: ~{progressState.timeRemainingSeconds}s</span>
                 </div>
 
                 {progressState.errorMessage && (
-                  <p className="text-xs text-rose-400">{progressState.errorMessage}</p>
+                  <div className="p-3 rounded-xl bg-rose-950/60 border border-rose-500/40 text-rose-300 text-xs flex flex-col gap-1">
+                    <div className="flex items-center gap-2 font-semibold">
+                      <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
+                      <span>Direct R2 Upload Error</span>
+                    </div>
+                    <p className="font-mono text-[11px] leading-relaxed">{progressState.errorMessage}</p>
+                  </div>
                 )}
               </div>
             )}
