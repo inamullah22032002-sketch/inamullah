@@ -176,6 +176,13 @@ export const api = {
     abortMultipart: (data: { uploadId: string; objectKey: string }) =>
       request<any>('/api/admin/uploads/multipart/abort', { method: 'POST', body: JSON.stringify(data) }),
 
+    // Security & Password Management
+    changePassword: (data: { currentPassword: string; newPassword: string; confirmPassword: string }) =>
+      request<{ success: boolean; message: string }>('/api/admin/change-password', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+
     // Users & Roles
     getUsers: () => request<any>('/api/admin/users'),
     updateUserRole: (id: string, role: string) =>

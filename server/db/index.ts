@@ -200,19 +200,25 @@ export async function initDatabase() {
     console.log('ℹ️ No active DATABASE_URL provided. Operating with in-memory resilient storage.');
   }
 
-  // Ensure an initial administrator exists in the system if no users exist.
-  // Note: We DO NOT prefill this in the UI.
-  const adminUser = await db.users.findByEmail('admin@funclubsi.com');
-  if (!adminUser) {
-    const salt = await bcrypt.genSalt(10);
-    const hash = await bcrypt.hash('FunclubSI#2026!Admin', salt);
+  // Bootstrap initial administrator ONLY if no account with role = 'ADMIN' exists in the database
+  const hasAdmin = await db.users.hasAnyAdmin();
+  if (!hasAdmin) {
+    const adminEmail = (process.env.ADMIN_EMAIL || '').trim().toLowerCase() || 'admin@funclubsi.com';
+    const initialPassword = process.env.ADMIN_INITIAL_PASSWORD || 'FunclubSI#2026!Admin';
+
+    // Hash securely using bcrypt with cost factor 12 before storing in database
+    const salt = await bcrypt.genSalt(12);
+    const passwordHash = await bcrypt.hash(initialPassword, salt);
+
     await db.users.create({
       name: 'System Administrator',
-      email: 'admin@funclubsi.com',
-      passwordHash: hash,
+      email: adminEmail,
+      passwordHash,
       role: 'ADMIN',
     });
-    console.log('🛡️ Bootstrap Administrator account initialized: admin@funclubsi.com');
+    console.log(`🛡️ Initial administrator account bootstrapped in database: ${adminEmail} (role = ADMIN).`);
+  } else {
+    console.log('🛡️ Existing administrator account detected in database. Initial bootstrap skipped.');
   }
 }
 
@@ -220,6 +226,21 @@ export const db = {
   isPostgres: () => isPostgresConnected,
 
   users: {
+    async hasAnyAdmin(): Promise<boolean> {
+      if (isPostgresConnected && pool) {
+        try {
+          const res = await pool.query("SELECT id FROM users WHERE role = 'ADMIN' LIMIT 1");
+          return res.rows.length > 0;
+        } catch (e: any) {
+          console.error('Error checking for existing admin in PostgreSQL:', e.message);
+        }
+      }
+      for (const u of memoryStore.users.values()) {
+        if (u.role === 'ADMIN') return true;
+      }
+      return false;
+    },
+
     async findByEmail(email: string): Promise<User | null> {
       const normalizedEmail = email.trim().toLowerCase();
       if (isPostgresConnected && pool) {

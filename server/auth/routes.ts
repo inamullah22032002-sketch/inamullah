@@ -178,9 +178,9 @@ authRouter.post('/admin/login', authLimiter, async (req: Request, res: Response)
     const { email, password } = req.body;
 
     if (!email || !password) {
-      return res.status(400).json({
+      return res.status(401).json({
         error: 'INVALID_CREDENTIALS',
-        message: 'Admin email and password are required.',
+        message: 'Invalid admin credentials',
       });
     }
 
@@ -188,7 +188,7 @@ authRouter.post('/admin/login', authLimiter, async (req: Request, res: Response)
     if (!user) {
       return res.status(401).json({
         error: 'INVALID_CREDENTIALS',
-        message: 'Invalid administrative credentials.',
+        message: 'Invalid admin credentials',
       });
     }
 
@@ -196,7 +196,7 @@ authRouter.post('/admin/login', authLimiter, async (req: Request, res: Response)
     if (!isMatch) {
       return res.status(401).json({
         error: 'INVALID_CREDENTIALS',
-        message: 'Invalid administrative credentials.',
+        message: 'Invalid admin credentials',
       });
     }
 
@@ -216,7 +216,7 @@ authRouter.post('/admin/login', authLimiter, async (req: Request, res: Response)
 
       return res.status(403).json({
         error: 'FORBIDDEN',
-        message: 'Access Denied: This account does not possess administrator permissions.',
+        message: 'Account is not an administrator',
       });
     }
 
@@ -258,8 +258,8 @@ authRouter.post('/admin/login', authLimiter, async (req: Request, res: Response)
   } catch (err: any) {
     console.error('Admin login error:', err);
     return res.status(500).json({
-      error: 'DATABASE_ERROR',
-      message: 'Admin authentication service encountered an error.',
+      error: 'SERVER_ERROR',
+      message: 'Server/database error',
     });
   }
 });

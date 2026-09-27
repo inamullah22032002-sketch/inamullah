@@ -1,5 +1,6 @@
 import { Router, Response } from 'express';
 import os from 'os';
+import bcrypt from 'bcryptjs';
 import { db } from '../db';
 import { authenticateToken, requireAdmin, AuthRequest } from '../auth/jwt';
 import { isR2Configured, getR2Config } from '../r2/config';
@@ -216,3 +217,88 @@ adminRouter.get('/health', async (_req: AuthRequest, res: Response) => {
     return res.status(500).json({ error: 'HEALTH_CHECK_FAILED', message: 'Failed to perform health check.' });
   }
 });
+
+// 6. CHANGE ADMIN PASSWORD
+adminRouter.post('/change-password', async (req: AuthRequest, res: Response) => {
+  try {
+    const { currentPassword, newPassword, confirmPassword } = req.body;
+    const adminId = req.user?.userId;
+
+    if (!adminId) {
+      return res.status(401).json({
+        error: 'UNAUTHORIZED',
+        message: 'Valid administrator session is required.',
+      });
+    }
+
+    if (!currentPassword || !newPassword || !confirmPassword) {
+      return res.status(400).json({
+        error: 'INVALID_INPUT',
+        message: 'Current password, new password, and confirmation are required.',
+      });
+    }
+
+    if (newPassword !== confirmPassword) {
+      return res.status(400).json({
+        error: 'PASSWORD_MISMATCH',
+        message: 'New password and confirmation do not match.',
+      });
+    }
+
+    if (newPassword.length < 8) {
+      return res.status(400).json({
+        error: 'WEAK_PASSWORD',
+        message: 'New password must be at least 8 characters long.',
+      });
+    }
+
+    const adminUser = await db.users.findById(adminId);
+    if (!adminUser) {
+      return res.status(404).json({
+        error: 'USER_NOT_FOUND',
+        message: 'Administrator account was not found in database.',
+      });
+    }
+
+    // Verify current password against stored hash
+    const isMatch = await bcrypt.compare(currentPassword, adminUser.passwordHash);
+    if (!isMatch) {
+      return res.status(400).json({
+        error: 'INVALID_CURRENT_PASSWORD',
+        message: 'The current password provided is incorrect.',
+      });
+    }
+
+    // Securely hash new password with cost factor 12
+    const salt = await bcrypt.genSalt(12);
+    const newPasswordHash = await bcrypt.hash(newPassword, salt);
+
+    // Persist to database
+    await db.users.update(adminId, { passwordHash: newPasswordHash });
+
+    // Record immutable audit event
+    await db.auditLogs.record({
+      userId: adminUser.id,
+      userName: adminUser.name,
+      userEmail: adminUser.email,
+      userRole: adminUser.role,
+      action: 'ADMIN_PASSWORD_CHANGED',
+      resource: `users/${adminUser.id}`,
+      details: { timestamp: new Date().toISOString() },
+      ipAddress: (req.headers['x-forwarded-for'] as string) || req.socket.remoteAddress,
+      userAgent: req.headers['user-agent'],
+    });
+
+    return res.json({
+      success: true,
+      message: 'Administrative password updated successfully in database.',
+    });
+  } catch (err: any) {
+    console.error('Change admin password error:', err);
+    return res.status(500).json({
+      error: 'SERVER_ERROR',
+      message: 'Server/database error while updating password.',
+    });
+  }
+});
+
